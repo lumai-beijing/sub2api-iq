@@ -1351,6 +1351,31 @@ describe('quality operations', () => {
     expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1, model_id: 'gpt-6-astra' }))
     wrapper.unmount()
   })
+  it('fills random and fixed schedule shortcuts and saves the chosen interval', async () => {
+    const wrapper = mountView(); await flushPromises()
+    const vm = wrapper.vm as any
+    vm.newPlan(); vm.accountScope = 'manual'; await flushPromises()
+    const input = wrapper.get('input[placeholder="*/30 * * * *"]')
+    await wrapper.get('[data-testid="quality-schedule-random"]').trigger('click')
+    expect((input.element as HTMLInputElement).value).toBe('@random 10-15')
+    await wrapper.get('[data-testid="quality-schedule-30"]').trigger('click')
+    expect((input.element as HTMLInputElement).value).toBe('*/30 * * * *')
+    await wrapper.get('[data-testid="quality-schedule-random"]').trigger('click')
+    vm.selectedAccounts = [1]
+    vm.form.pelican_config.quality.remove_group_ids = [21]
+    await vm.save()
+    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ cron_expression: '@random 10-15' }))
+    wrapper.unmount()
+  })
+  it('shows a random schedule on rule and template cards', async () => {
+    const plan = { ...rules()[0], cron_expression: '@random 10-15' }
+    vi.mocked(listQualityPlans).mockResolvedValue([plan])
+    vi.mocked(listQualityTemplates).mockResolvedValue([{ ...groupRule(), cron_expression: '@random 5-5' }])
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.get('[data-plan-id="1"] [data-testid="quality-schedule-tag"]').text()).toBe('qualityOps.randomSchedule')
+    expect(wrapper.get('[data-template-id="7"] [data-testid="quality-schedule-tag"]').text()).toBe('qualityOps.fixedIntervalSchedule')
+    wrapper.unmount()
+  })
   it('requires explicit group selection and keeps automatic restoration opt-in', async () => {
     const wrapper = mountView(); await flushPromises()
     const vm = wrapper.vm as any
