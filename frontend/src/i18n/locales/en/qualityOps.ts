@@ -266,6 +266,8 @@ export default {
     "restore_counted_n": "Healthy {n}/{m}; BPS kept for now"
   },
   "judgeTitle": "Model grading",
+  "candyBuiltinGrading": "Candy questions are reworded on every run, must answer in JSON, and are graded directly from the answer field — no judge model needed.",
+  "candyVariant": "Variant: {sig}",
   "judgeGroup": "Grading group",
   "judgeModel": "Grading model",
   "selectJudgeGroup": "Select a grading group",

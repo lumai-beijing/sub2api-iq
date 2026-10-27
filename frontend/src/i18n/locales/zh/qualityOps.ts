@@ -266,6 +266,8 @@ export default {
     "restore_counted_n": "满血 {n}/{m} 次，暂不关闭 BPS"
   },
   "judgeTitle": "模型判题",
+  "candyBuiltinGrading": "糖果题每次随机改写题面，要求只输出 JSON，程序直接按 answer 判分，不需要判题模型。",
+  "candyVariant": "题面：{sig}",
   "judgeGroup": "判题分组",
   "judgeModel": "判题模型",
   "selectJudgeGroup": "请选择判题分组",

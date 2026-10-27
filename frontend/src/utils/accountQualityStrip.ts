@@ -91,8 +91,15 @@ interface RoundGroup {
   byModel: Map<string, ScheduledTestResult[]>
 }
 
+// 糖果题要求输出 {"answer": 21, ...}：有 answer 字段就只显示它的值（取最后一个），否则显示回答结尾。
+const answerFieldPattern = /"answer"\s*:\s*(?:(-?\d+(?:\.\d+)?)|"([^"]*)")/g
+
 const formatAnswer = (text: string): string => {
-  const normalized = (text ?? '').trim().replace(/\r\n|\r|\n/g, ' ')
+  const raw = text ?? ''
+  const last = [...raw.matchAll(answerFieldPattern)].pop()
+  const value = last?.[1] ?? last?.[2]?.match(/-?\d+(?:\.\d+)?/)?.[0]
+  if (value) return value
+  const normalized = raw.trim().replace(/\r\n|\r|\n/g, ' ')
   return normalized.length > 24 ? normalized.slice(-24) : normalized
 }
 

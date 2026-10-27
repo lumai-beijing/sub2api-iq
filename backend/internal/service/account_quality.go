@@ -167,10 +167,10 @@ func qualityRoundOutcome(results []*ScheduledTestResult) string {
 	if len(results) == 1 && results[0] != nil {
 		r := results[0]
 		if r.PelicanConfig != nil && r.PelicanConfig.Quality != nil && r.PelicanConfig.Quality.Action == QualityActionOpenAITwoFAAdmission {
-			if r.Status == "success" && CandyAnswerCorrect(r.ResponseText) {
+			if r.Status == "success" {
 				return "passed"
 			}
-			if r.Status == "failed" && r.ErrorMessage == "answer_mismatch" && CandyAnswerIs29(r.ResponseText) {
+			if r.Status == "failed" && r.ErrorMessage == "answer_mismatch" && GradeCandyAnswer(r.ResponseText, 21).Value == "29" {
 				return "answer_29"
 			}
 			return "inconclusive"

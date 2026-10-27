@@ -120,7 +120,8 @@ func TestQuality5xxChoosesProbeOrCandyWithoutChangingRule(t *testing.T) {
 					calls++
 					if bps {
 						require.Equal(t, "candy", cfg.QuestionKind)
-						require.Equal(t, CandyPrompt, cfg.Prompt)
+						require.NotEqual(t, CandyPrompt, cfg.Prompt)
+						require.NotEmpty(t, cfg.CandyVariant)
 						return &ScheduledTestResult{Status: "success", ResponseText: "21"}, nil
 					}
 					require.Equal(t, OpenAICodexStateProbeQuestionKind, cfg.QuestionKind)

@@ -15,6 +15,8 @@ type PelicanTestConfig struct {
 	QualityModelActions      map[string]string         `json:"quality_model_actions,omitempty"`
 	TriggerSource            string                    `json:"trigger_source,omitempty"`
 	RandomQuestion           *QualityRandomQuestion    `json:"random_question,omitempty"`
+	// Filled only on saved result snapshots: the signature of the candy prompt used for this run.
+	CandyVariant string `json:"candy_variant,omitempty"`
 	// BPSRecoveryPending is filled from persisted ownership when the runner
 	// claims a plan. It is never accepted from or written to configuration JSON.
 	BPSRecoveryPending bool           `json:"-"`

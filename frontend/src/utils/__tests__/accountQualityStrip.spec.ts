@@ -291,6 +291,24 @@ describe('accountQualityStrip', () => {
       expect(strip.rounds[0].cells[0].error).toBe('E'.repeat(60))
     })
 
+    it('shows the JSON answer field instead of the raw reply tail', () => {
+      const stripPlan = plan(8, { pelican_config: candyConfig(['gpt-6-astra', 'gpt-6.1-sol']) })
+      const strip = buildQualityStrip(stripPlan, [
+        result(80, {
+          quality_round_id: 'round-a',
+          response_text: '先算一下……\n{"answer": 29, "reasoning": "按口味最坏情况取完再加一，得到二十九"}',
+          pelican_config: resultConfig('gpt-6-astra')
+        }),
+        result(81, {
+          quality_round_id: 'round-a',
+          response_text: '{"answer": 20}\n更正：{"answer": "21个", "reasoning": "x"}',
+          pelican_config: resultConfig('gpt-6.1-sol')
+        })
+      ])
+
+      expect(strip.rounds[0].cells.map(cell => cell.answer)).toEqual(['29', '21'])
+    })
+
     it('falls back to the plan id as the rule name', () => {
       const strip = buildQualityStrip(plan(88, {
         pelican_config: candyConfig(['gpt-6-astra'], { rule_name: '   ' })

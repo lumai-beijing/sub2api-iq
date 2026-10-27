@@ -2726,6 +2726,8 @@ export interface PelicanTestConfig {
   question_kind?: 'candy' | 'pelican' | 'state_probe' | 'random_reasoning'
   // Result-only identity of a runtime-generated question.
   random_question?: { id: string; family: 'paths' | 'weighted_xor'; version: string }
+  // Result-only signature of the candy prompt rendered for this run.
+  candy_variant?: string
   test_channel?: 'account' | 'bps'
   prompt: string
   reasoning_effort: string

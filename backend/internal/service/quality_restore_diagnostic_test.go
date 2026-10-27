@@ -36,7 +36,7 @@ func TestQualityRestoreDiagnosticRoundSnapshotAndRejectedActions(t *testing.T) {
 				return &QualityJudgment{Verdict: "correct"}
 			}
 			runner.runPelican = func(context.Context, int64, string, *PelicanTestConfig) (*ScheduledTestResult, error) {
-				return &ScheduledTestResult{Status: "success", QualityJudgment: &QualityJudgment{Verdict: "correct"}}, nil
+				return &ScheduledTestResult{Status: "success", ResponseText: "21", QualityJudgment: &QualityJudgment{Verdict: "correct"}}, nil
 			}
 			plan := pelicanPlan()
 			plan.PelicanConfig.QuestionKind = "candy"

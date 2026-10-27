@@ -830,6 +830,24 @@ describe('quality operations', () => {
     saved.unmount()
   })
 
+  it('hides the judge settings for candy rules and saves them without a judge', async () => {
+    const plan = rules()[0]
+    plan.pelican_config!.question_kind = 'candy'
+    plan.pelican_config!.prompt = 'question'
+    plan.pelican_config!.quality!.expected_answer = '21'
+    plan.pelican_config!.quality!.judge = { group_id: 21, model_id: 'test-judge', prompt: 'Grade' }
+    vi.mocked(listQualityPlans).mockResolvedValue([plan])
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.find('[data-plan-id="1"] .rule-warning').exists()).toBe(false)
+    await wrapper.get('.rule-actions button:nth-child(2)').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-testid="quality-candy-builtin"]').exists()).toBe(true)
+    expect(wrapper.find('#quality-judge-models').exists()).toBe(false)
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    const payload = vi.mocked(scheduledTests.update).mock.calls.at(-1)![1] as any
+    expect(payload.pelican_config.quality.judge).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it.each(['state_probe', 'candy'] as const)('preserves the saved 5xx trigger when editing a %s rule', async questionKind => {
     const plan = rules()[0]
     plan.pelican_config!.question_kind = questionKind
@@ -1342,7 +1360,8 @@ describe('quality operations', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.selectGroups')
     vm.form.pelican_config.quality.remove_group_ids = [21]
     await vm.save()
-    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1, auto_recover: false, pelican_config: expect.objectContaining({ quality: { trigger_on_upstream_5xx: false, expected_answer: '21', action: 'remove_groups', remove_group_ids: [21], auto_restore: false, judge: {group_id:21,model_id:'test-judge',prompt:'grade semantically'} } }) }))
+    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1, auto_recover: false, pelican_config: expect.objectContaining({ quality: { trigger_on_upstream_5xx: false, expected_answer: '21', action: 'remove_groups', remove_group_ids: [21], auto_restore: false } }) }))
+    expect((vi.mocked(scheduledTests.create).mock.calls.at(-1)![0] as any).pelican_config.quality.judge).toBeUndefined()
     wrapper.unmount()
   })
   it('retries only accounts that were not created before a partial batch failure', async () => {
@@ -1372,9 +1391,10 @@ describe('quality operations', () => {
     await vm.moreOperations(); expect(listQualityOperations).toHaveBeenLastCalledWith(10)
     wrapper.unmount()
   })
-  it('requires the operator to select a judge model and group', async () => {
+  it('requires the operator to select a judge model and group for non-candy answer rules', async () => {
     const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
     vm.newPlan(); vm.accountScope = 'manual'; vm.selectedAccounts = [1]; vm.form.model_id = 'test-model'
+    vm.form.pelican_config.question_kind = 'random_reasoning'; await flushPromises()
     await vm.save(); expect(scheduledTests.create).not.toHaveBeenCalled()
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
     wrapper.unmount()
@@ -1394,7 +1414,7 @@ describe('quality operations', () => {
     expect(request.pelican_config.quality).not.toHaveProperty('judge')
     wrapper.unmount()
   })
-  it('switching a probe rule back to candy restores the question and judge fields', async () => {
+  it('switching a probe rule back to candy restores the question and saves without a judge', async () => {
     const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
     vm.edit({ id: 5, account_id: 1, model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, pelican_config: { question_kind: 'state_probe', prompt: '', reasoning_effort: 'high', parallel_count: 1, quality: { expected_answer: '', action: 'disable_scheduling', remove_group_ids: [], auto_restore: true } } })
     await flushPromises()
@@ -1402,10 +1422,10 @@ describe('quality operations', () => {
     await wrapper.find('[data-testid="quality-question-kind"]').setValue('candy')
     expect(wrapper.find('#quality-prompt').exists()).toBe(true)
     expect(vm.form.pelican_config.quality.expected_answer).toBe('21')
-    expect(vm.form.pelican_config.quality.judge).toEqual({ group_id: 0, model_id: '', prompt: 'qualityOps.defaultJudgePrompt' })
+    expect(wrapper.find('[data-testid="quality-candy-builtin"]').exists()).toBe(true)
     await vm.save()
-    expect(scheduledTests.update).not.toHaveBeenCalled()
-    expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
+    expect(scheduledTests.update).toHaveBeenCalledTimes(1)
+    expect((vi.mocked(scheduledTests.update).mock.calls[0][1] as any).pelican_config.quality.judge).toBeUndefined()
     wrapper.unmount()
   })
   it.each(['state_probe', 'candy'] as const)('shows unsupported %s models as neutral skips without a fabricated answer', async kind => {
@@ -1796,7 +1816,7 @@ describe('quality operations', () => {
     vm.newPlan(); await flushPromises()
     vi.mocked(accountsAPI.list).mockClear()
     await vm.save()
-    expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
+    expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.selectGroups')
     expect(accountsAPI.list).not.toHaveBeenCalled()
     expect(createQualityTemplate).not.toHaveBeenCalled()
     expect(vm.selectedAccounts).toEqual([])
