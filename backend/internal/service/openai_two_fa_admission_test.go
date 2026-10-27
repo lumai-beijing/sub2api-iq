@@ -124,6 +124,8 @@ func TestOpenAITwoFAAdmissionImportScopeAndSnapshot(t *testing.T) {
 func TestOpenAITwoFAAdmissionOnlyCountsCompleteExactAnswers(t *testing.T) {
 	for _, tc := range []struct{ answer, status, message, expected string }{
 		{"21", "success", "", "passed"}, {"29", "success", "", "answer_29"},
+		{"21个。", "success", "", "passed"}, {"21个", "success", "", "passed"},
+		{"29个。", "success", "", "answer_29"},
 		{" 29\n", "success", "", "answer_29"}, {"129", "success", "", "inconclusive"},
 		{"21 or 29", "success", "", "inconclusive"}, {"29", "failed", "incomplete stream", "inconclusive"},
 		{"21", "failed", "incomplete stream", "inconclusive"}, {"", "failed", "timeout", "inconclusive"},

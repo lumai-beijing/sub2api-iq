@@ -14,3 +14,16 @@ func TestCandyAnswerCorrect(t *testing.T) {
 		}
 	}
 }
+
+func TestCandyAnswerIs29(t *testing.T) {
+	for _, answer := range []string{"29", "29个", "29个。", "答案是 29 个糖果。", "二十九颗糖果", "２９个"} {
+		if !CandyAnswerIs29(answer) {
+			t.Errorf("rejected correct answer %q", answer)
+		}
+	}
+	for _, answer := range []string{"", "21", "129", "290", "29.5", "29或21", "不是29", "2 9"} {
+		if CandyAnswerIs29(answer) {
+			t.Errorf("accepted incorrect answer %q", answer)
+		}
+	}
+}

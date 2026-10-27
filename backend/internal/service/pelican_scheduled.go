@@ -332,7 +332,7 @@ func (s *ScheduledTestRunnerService) runPelicanSample(ctx context.Context, plan 
 		var judgment *QualityJudgment
 		if plan.PelicanConfig.Quality.Action == QualityActionOpenAITwoFAAdmission {
 			judgment = &QualityJudgment{Verdict: "incorrect", Reason: "builtin_admission", AccountID: plan.AccountID}
-			if strings.TrimSpace(result.ResponseText) == "21" {
+			if CandyAnswerCorrect(result.ResponseText) {
 				judgment.Verdict = "correct"
 			}
 		} else if plan.TriggerSource == quality5xxSource && isBuiltinCandyPlan(plan.PelicanConfig) {
