@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -10,7 +13,16 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+var (
+	scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	randomSchedulePattern   = regexp.MustCompile(`^@random\s+(\d+)\s*-\s*(\d+)$`)
+	// 包级随机源便于测试替换；n 为闭区间上界（含）。
+	randomIntervalSeconds = func(n int64) int64 { return rand.Int64N(n) }
+)
+
+func invalidRandomIntervalError() error {
+	return fmt.Errorf(`random interval must look like "@random 10-15" (minutes, 1 <= min <= max <= 1440)`)
+}
 
 // ScheduledTestService provides CRUD operations for scheduled test plans and results.
 type ScheduledTestService struct {
@@ -106,6 +118,23 @@ func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, max
 }
 
 func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {
+	trimmed := strings.TrimSpace(cronExpr)
+	if strings.HasPrefix(trimmed, "@random") {
+		match := randomSchedulePattern.FindStringSubmatch(trimmed)
+		if match == nil {
+			return time.Time{}, invalidRandomIntervalError()
+		}
+		minMinutes, minErr := strconv.Atoi(match[1])
+		maxMinutes, maxErr := strconv.Atoi(match[2])
+		if minErr != nil || maxErr != nil || minMinutes < 1 || maxMinutes > 1440 || minMinutes > maxMinutes {
+			return time.Time{}, invalidRandomIntervalError()
+		}
+		offset := time.Duration(minMinutes) * time.Minute
+		if span := maxMinutes - minMinutes; span > 0 {
+			offset += time.Duration(randomIntervalSeconds(int64(span)*60+1)) * time.Second
+		}
+		return from.Add(offset), nil
+	}
 	sched, err := scheduledTestCronParser.Parse(cronExpr)
 	if err != nil {
 		return time.Time{}, err
