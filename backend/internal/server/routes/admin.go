@@ -471,6 +471,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
+		// 浏览器手动补 Excel/BPS 授权：先生成链接，再把 bps.openai.com 回调贴回来。
+		accounts.POST("/:id/openai-excel/authorize", h.Admin.Account.BeginExcelManualAuthorize)
+		accounts.POST("/:id/openai-excel/callback", h.Admin.Account.CompleteExcelManualAuthorize)
 		accounts.POST("/:id/set-privacy", h.Admin.Account.SetPrivacy)
 		accounts.POST("/:id/refresh-tier", h.Admin.Account.RefreshTier)
 		accounts.GET("/:id/stats", h.Admin.Account.GetStats)
