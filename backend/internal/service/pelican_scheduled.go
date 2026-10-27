@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	mathrand "math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -118,6 +121,8 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	}
 	// Result-only metadata must not mutate the stored rule or shared plan config.
 	snapshot := *plan.PelicanConfig
+	snapshot.QualityRestoreDiagnostic = nil
+	plan.QualityRestoreDiagnostic = nil
 	snapshot.TriggerSource = plan.TriggerSource
 	if snapshot.TriggerSource == "" {
 		snapshot.TriggerSource = "scheduled"
@@ -166,6 +171,11 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	if plan.PelicanConfig.QuestionKind == QualityRandomQuestionKind {
 		randomSamples, randomQuestionErr = newQualityRandomSamples(plan.PelicanConfig)
 	}
+	// 糖果题每个并行样本换一个题面，同一并行样本下的所有模型共用；不修改存库的 plan.PelicanConfig。
+	var candySamples []*PelicanTestConfig
+	if isCandyQuestion(plan.PelicanConfig) {
+		candySamples = newCandyVariantSamples(plan.PelicanConfig, len(results)/len(models))
+	}
 	// Samples are interleaved by model so each model can start before repeats.
 	// Bound upstream concurrency while waiting for every result, even failures.
 	jobs := make(chan int, len(results))
@@ -195,6 +205,9 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 				cfg.ModelID = samplePlan.ModelID
 				if randomSamples != nil {
 					cfg = *randomSamples[index/len(models)]
+					cfg.ModelID = samplePlan.ModelID
+				} else if candySamples != nil {
+					cfg = *candySamples[index/len(models)]
 					cfg.ModelID = samplePlan.ModelID
 				}
 				samplePlan.PelicanConfig = &cfg
@@ -243,7 +256,7 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		if plan.TriggerSource == quality5xxSource && plan.TriggerObservedAt != nil && s.qualityTrigger != nil {
 			freshSignal = s.qualityTrigger.signalIsCurrent(plan.AccountID, *plan.TriggerObservedAt)
 		}
-		if applyTriggeredQuality && freshSignal && qualityRoundHasResults(results) {
+		if applyTriggeredQuality && freshSignal && (qualityRoundHasResults(results) || plan.PelicanConfig.Quality.Action == QualityActionOpenAITwoFAAdmission) {
 			var actionErr error
 			qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityRoundOutcome(results))
 			if actionErr != nil {
@@ -258,6 +271,10 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		if plan.PelicanConfig.Quality != nil {
 			result.QualityRoundID = until.Format(time.RFC3339Nano)
 			result.PelicanConfig.QualityModelOutcomes = plan.QualityModelOutcomes
+			result.PelicanConfig.QualityRestoreDiagnostic = nil
+			if qualityAction == "restore_conflict" {
+				result.PelicanConfig.QualityRestoreDiagnostic = plan.QualityRestoreDiagnostic
+			}
 			// A rejected transaction must never advertise uncommitted changes.
 			if qualityAction != "action_error" && qualityAction != "action_conflict" && qualityAction != "restore_conflict" && qualityAction != "stale_run" {
 				result.PelicanConfig.QualityModelActions = plan.QualityModelActions
@@ -324,10 +341,16 @@ func (s *ScheduledTestRunnerService) runPelicanSample(ctx context.Context, plan 
 	// 探针题型的结果自带 correct/incorrect/unknown 判定，不经过判题模型。
 	if plan.PelicanConfig.Quality != nil && result.Status == "success" && !isOpenAICodexStateProbePlan(plan.PelicanConfig) {
 		var judgment *QualityJudgment
-		if plan.TriggerSource == quality5xxSource && isBuiltinCandyPlan(plan.PelicanConfig) {
-			judgment = &QualityJudgment{Verdict: "incorrect", Reason: "builtin_candy", AccountID: plan.AccountID}
-			if CandyAnswerCorrect(result.ResponseText) {
-				judgment.Verdict = "correct"
+		if isCandyQuestion(plan.PelicanConfig) {
+			// 糖果题答案固定，一律内置判分；规则里配了判题模型也忽略，不占用客户并发。
+			g := GradeCandyAnswer(result.ResponseText, 21)
+			switch g.Outcome {
+			case CandyOutcomeCorrect:
+				judgment = &QualityJudgment{Verdict: "correct", Reason: "builtin_candy_" + g.Format, AccountID: plan.AccountID}
+			case CandyOutcomeWrong:
+				judgment = &QualityJudgment{Verdict: "incorrect", Reason: "builtin_candy_" + g.Format + ": answered " + g.Value, AccountID: plan.AccountID}
+			default:
+				judgment = &QualityJudgment{Verdict: "unknown", Reason: "builtin_candy_no_answer", AccountID: plan.AccountID}
 			}
 		} else if s.judgeQuality != nil {
 			judgment = s.judgeQuality(ctx, plan.AccountID, plan.PelicanConfig, result.ResponseText)
@@ -384,8 +407,45 @@ func isBuiltinCandyPlan(cfg *PelicanTestConfig) bool {
 	return cfg != nil && strings.TrimSpace(cfg.Prompt) == strings.TrimSpace(CandyPrompt)
 }
 
+func isCandyQuestion(cfg *PelicanTestConfig) bool {
+	return cfg != nil && (cfg.QuestionKind == "candy" || isBuiltinCandyPlan(cfg))
+}
+
+// newCandyVariant 生成一个随机糖果题面；熵不可用时退回原题面，不让整轮失败。
+func newCandyVariant() CandyVariant {
+	var seed [16]byte
+	if _, err := io.ReadFull(rand.Reader, seed[:]); err != nil {
+		return OriginalCandyVariant()
+	}
+	rng := mathrand.New(mathrand.NewPCG(binary.LittleEndian.Uint64(seed[:8]), binary.LittleEndian.Uint64(seed[8:]))) //nolint:gosec
+	return RenderCandyVariant(rng)
+}
+
+// newCandyVariantSamples 为每个并行样本准备一个题面；同一并行样本下的所有模型共用同一个题面。
+func newCandyVariantSamples(cfg *PelicanTestConfig, count int) []*PelicanTestConfig {
+	if count <= 0 {
+		return nil
+	}
+	samples := make([]*PelicanTestConfig, count)
+	for i := range samples {
+		variant := newCandyVariant()
+		snapshot := *cfg
+		snapshot.Prompt = variant.Prompt
+		snapshot.CandyVariant = variant.Signature
+		samples[i] = &snapshot
+	}
+	return samples
+}
+
 // Missing kind preserves HTML validation for saved plans from older versions.
 func intelligenceTestPrompt(cfg *PelicanTestConfig) string {
+	if isCandyQuestion(cfg) {
+		// 糖果题题面已含 JSON 作答要求，不能再追加「只输出最终整数」，否则要求冲突。
+		if cfg.CandyVariant == "" {
+			return newCandyVariant().Prompt
+		}
+		return cfg.Prompt
+	}
 	if cfg.Quality != nil {
 		return cfg.Prompt + "\n\n只输出最终答案，不要解释。"
 	}
@@ -393,11 +453,7 @@ func intelligenceTestPrompt(cfg *PelicanTestConfig) string {
 		// The V1 challenge already asks for the bare number.
 		return cfg.Prompt
 	}
-	contract := PelicanDeliveryContract
-	if cfg.QuestionKind == "candy" || isBuiltinCandyPlan(cfg) {
-		contract = "只输出最终整数，不要解释。"
-	}
-	return cfg.Prompt + "\n\n" + contract
+	return cfg.Prompt + "\n\n" + PelicanDeliveryContract
 }
 func intelligenceTestOutputError(cfg *PelicanTestConfig, output string) string {
 	if cfg.Quality != nil {
@@ -414,10 +470,16 @@ func intelligenceTestOutputError(cfg *PelicanTestConfig, output string) string {
 		// The V3 prober checks the arithmetic answer itself.
 		return ""
 	}
-	if isBuiltinCandyPlan(cfg) && !CandyAnswerCorrect(output) {
-		return "answer_mismatch: expected 21"
+	if isCandyQuestion(cfg) {
+		switch g := GradeCandyAnswer(output, 21); g.Outcome {
+		case CandyOutcomeWrong:
+			return "answer_mismatch: expected 21, got " + g.Value
+		case CandyOutcomeNoAnswer:
+			return "answer_missing: expected 21"
+		}
+		return ""
 	}
-	if cfg.QuestionKind != "candy" && !isBuiltinCandyPlan(cfg) && !pelicanHTMLPattern.MatchString(output) {
+	if !pelicanHTMLPattern.MatchString(output) {
 		return "Model did not return HTML or SVG"
 	}
 	return ""

@@ -25,6 +25,16 @@
 
 密码/TOTP Worker 为 Excel 临时生成的登录运行副本，只向 OAuth 授权域 `auth.openai.com` 做代理预检，不再要求先通过 ChatGPT 首页检查；普通 Codex 登录仍使用原有预检。授权域预检或实际 authorize 返回安全检查、额外验证时仍会停止，不自动换出口重试。这个调整不保证 BPS 模型质量或延长票据寿命。
 
+### 给已有账号手动补授权
+
+当自动登录 Worker 的出口被 Cloudflare 拦截时，可由管理员在浏览器里手动完成 Excel/BPS 登录，再把回调贴回后台。该通道只给现有的 OpenAI OAuth 账号补存独立的 Excel 授权，账号的 BPS 开关、并发、调度和分组都不变。
+
+1. `POST /api/v1/admin/accounts/:id/openai-excel/authorize`：返回 `session_id` 和 `auth_url`。用返回的链接在浏览器登录并选择工作区；授权使用账号自己的出口代理。
+2. 登录完成后页面会跳到 `https://bps.openai.com/.../auth/callback?code=...&state=...`，复制完整回调 URL。
+3. `POST /api/v1/admin/accounts/:id/openai-excel/callback`，请求体为 `{"session_id": "...", "callback_url": "..."}`。后台会核对 `state`、兑换 Token、校验 `chatgpt_account_id`/`user_id`/`email` 与账号一致，然后写入 `openai_excel_oauth_credentials` 并清掉 `openai_excel_bps_authorization_pending`。身份不一致会返回冲突错误，不会覆盖账号凭据。
+
+回调 URL 含一次性 code，不要贴到聊天、工单或日志。该接口只负责保存 Excel 授权，是否开启 BPS 仍需另外配置。
+
 ## 托管工具与原生回退策略
 
 账号编辑和批量编辑中可开启 **保持 BPS，省略不支持的托管工具**，对应账号配置 `extra.openai_excel_bps_omit_unsupported_tools: true`。默认关闭，无需数据库迁移，只影响该账号所选 BPS 模型。分组内有多个可调度账号时，应分别设置或使用批量编辑，避免不同账号采用不同策略。

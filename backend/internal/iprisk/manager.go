@@ -137,7 +137,7 @@ func (m *Manager) Save(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	if c.Enabled && !m.emergencyDisabled {
+	if (normalized.Enabled || normalized.AnonymousAPI.Enabled) && !m.emergencyDisabled {
 		if m.redis == nil {
 			return fmt.Errorf("redis is required for IP risk control")
 		}
@@ -217,11 +217,12 @@ func modePrefix(observe bool) string {
 }
 
 type Ban struct {
-	Network     string `json:"network"`
-	Reason      string `json:"reason"`
-	CreatedAt   int64  `json:"created_at"`
-	ExpiresAt   int64  `json:"expires_at"`
-	ObserveOnly bool   `json:"observe_only"`
+	RetryAfter  time.Duration `json:"-"`
+	Network     string        `json:"network"`
+	Reason      string        `json:"reason"`
+	CreatedAt   int64         `json:"created_at"`
+	ExpiresAt   int64         `json:"expires_at"`
+	ObserveOnly bool          `json:"observe_only"`
 }
 
 // One fixed expiry shared by all nodes. A blocked request never prolongs the ban.
@@ -271,8 +272,14 @@ func (m *Manager) count(ctx context.Context, c Config, network, reason string, t
 	prefix := modePrefix(c.ObserveOnly)
 	hash := hashNetwork(network)
 	now := time.Now()
-	ban := Ban{network, reason, now.Unix(), now.Unix() + int64(c.BanSeconds), c.ObserveOnly}
-	encoded, _ := json.Marshal(ban)
+	ban := Ban{Network: network, Reason: reason, CreatedAt: now.Unix(), ExpiresAt: now.Unix() + int64(c.BanSeconds), ObserveOnly: c.ObserveOnly}
+	// A fresh internal generation prevents a stale administrative confirmation
+	// from matching a replacement ban created with identical second timestamps.
+	// It is retained only in Redis; public Ban metadata remains unchanged.
+	encoded, _ := json.Marshal(struct {
+		Ban
+		Generation string `json:"generation"`
+	}{Ban: ban, Generation: uuid.NewString()})
 	limit := t.Limit + 1 // Allow exactly Limit requests; failures ban on the Limit-th failure.
 	if failure {
 		limit = t.Limit
@@ -423,11 +430,31 @@ func (m *Manager) record(ctx context.Context, c Config, event Event) {
 }
 
 func (m *Manager) Events(ctx context.Context, ipFilter, reason, category string) ([]Event, error) {
+	result, err := m.EventsPage(ctx, ipFilter, reason, category, 1, 200)
+	return result.Items, err
+}
+
+type EventPage struct {
+	Items    []Event `json:"items"`
+	Total    int     `json:"total"`
+	Page     int     `json:"page"`
+	PageSize int     `json:"page_size"`
+	Pages    int     `json:"pages"`
+}
+
+// EventsPage filters the bounded event stream before counting and paginating it.
+func (m *Manager) EventsPage(ctx context.Context, ipFilter, reason, category string, page, pageSize int) (EventPage, error) {
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
 	ipFilter = strings.TrimSpace(ipFilter)
 	if ipFilter != "" {
 		network, err := ParseNetwork(ipFilter)
 		if err != nil {
-			return nil, err
+			return EventPage{}, err
 		}
 		if strings.Contains(ipFilter, "/") {
 			ipFilter = network.String()
@@ -436,18 +463,18 @@ func (m *Manager) Events(ctx context.Context, ipFilter, reason, category string)
 		}
 	}
 	if m.redis == nil {
-		return nil, errors.New("redis unavailable")
+		return EventPage{}, errors.New("redis unavailable")
 	}
 	c, err := m.Config(ctx)
 	if err != nil {
-		return nil, err
+		return EventPage{}, err
 	}
 	if err := m.redis.ZRemRangeByScore(ctx, redisPrefix+"events", "-inf", fmt.Sprint(time.Now().Add(-time.Duration(c.EventRetentionHours)*time.Hour).UnixMicro())).Err(); err != nil {
-		return nil, err
+		return EventPage{}, err
 	}
 	values, err := m.redis.ZRangeArgs(ctx, redis.ZRangeArgs{Key: redisPrefix + "events", Start: 0, Stop: maxEvents - 1, Rev: true}).Result()
 	if err != nil {
-		return nil, err
+		return EventPage{}, err
 	}
 	events := []Event{}
 	cutoff := time.Now().Add(-time.Duration(c.EventRetentionHours) * time.Hour).Unix()
@@ -466,11 +493,17 @@ func (m *Manager) Events(ctx context.Context, ipFilter, reason, category string)
 			continue
 		}
 		events = append(events, event)
-		if len(events) >= 200 {
-			break
-		}
 	}
-	return events, nil
+	total := len(events)
+	pages := max(1, (total+pageSize-1)/pageSize)
+	// Retention or clearing can remove pages between requests. Clamp before
+	// calculating the offset, which also avoids overflow from oversized pages.
+	page = min(max(1, page), pages)
+	start := (page - 1) * pageSize
+	return EventPage{
+		Items: events[start:min(start+pageSize, total)],
+		Total: total, Page: page, PageSize: pageSize, Pages: pages,
+	}, nil
 }
 
 func (m *Manager) ClearEvents(ctx context.Context) error {

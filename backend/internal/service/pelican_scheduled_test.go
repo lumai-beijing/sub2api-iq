@@ -45,6 +45,20 @@ func TestPelicanPlanValidation(t *testing.T) {
 	require.True(t, old.AutoRecover)
 }
 
+func TestScheduledRuleNameValidation(t *testing.T) {
+	for _, name := range []string{"", "  Quality rule (copy)  ", strings.Repeat("副", 100)} {
+		plan := pelicanPlan()
+		plan.PelicanConfig.RuleName = name
+		_, err := nextPlanRun(plan, time.Now())
+		require.NoError(t, err)
+		require.Equal(t, strings.TrimSpace(name), plan.PelicanConfig.RuleName)
+	}
+	plan := pelicanPlan()
+	plan.PelicanConfig.RuleName = strings.Repeat("副", 101)
+	_, err := nextPlanRun(plan, time.Now())
+	require.EqualError(t, err, "rule name must be at most 100 characters")
+}
+
 type pelicanPlanRepo struct {
 	ScheduledTestPlanRepository
 	mu       sync.Mutex
@@ -135,14 +149,18 @@ func TestIntelligenceQuestionContractAndLegacyPlans(t *testing.T) {
 	for _, kind := range []string{"", "pelican", "candy"} {
 		cfg := &PelicanTestConfig{QuestionKind: kind, Prompt: "original question"}
 		prompt := intelligenceTestPrompt(cfg)
-		require.Contains(t, prompt, "original question")
 		if kind == "candy" {
+			// 糖果题会换成随机题面并只要求 JSON，不再追加「只输出最终整数」。
+			require.NotContains(t, prompt, "original question")
 			require.NotContains(t, prompt, "HTML")
-			require.Contains(t, prompt, "只输出最终整数")
+			require.NotContains(t, prompt, "只输出最终整数")
+			require.Contains(t, prompt, "JSON")
+			require.Contains(t, prompt, `{"answer": <整数>`)
 			require.Empty(t, intelligenceTestOutputError(cfg, "21"))
-			require.Empty(t, intelligenceTestOutputError(cfg, "29"), "not an automatic score")
+			require.Contains(t, intelligenceTestOutputError(cfg, "29"), "answer_mismatch")
 			require.NotEmpty(t, intelligenceTestOutputError(cfg, " "))
 		} else {
+			require.Contains(t, prompt, "original question")
 			require.Contains(t, prompt, PelicanDeliveryContract)
 			require.NotEmpty(t, intelligenceTestOutputError(cfg, "21"))
 			require.Empty(t, intelligenceTestOutputError(cfg, "<html></html>"))

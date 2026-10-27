@@ -1,8 +1,11 @@
 import { apiClient } from '@/api/client'
+import type { PaginatedResponse } from '@/types'
 
 export interface IPThreshold { limit: number; window_seconds: number }
 export interface IPBlockRule { network: string; note: string; enabled: boolean; expires_at: number }
+export interface AnonymousAPIConfig { enabled: boolean; threshold: number; window_seconds: number; ban_seconds: number; max_tracked_ips: number; reset_on_success: boolean }
 export interface IPRiskConfig {
+  anonymous_api: AnonymousAPIConfig
   enabled: boolean
   observe_only: boolean
   whitelist: string[]
@@ -49,8 +52,10 @@ const base = '/admin/settings/ip-risk'
 export const ipRiskAPI = {
   async get() { return (await apiClient.get<IPRiskSnapshot>(base)).data },
   async save(config: IPRiskConfig) { return (await apiClient.put<IPRiskConfig>(base, config)).data },
-  async events(ip = '', reason = '', category = '') { return (await apiClient.get<{ items: IPRiskEvent[] }>(base + '/events', { params: { ip, reason, category } })).data.items },
+  async events(ip = '', reason = '', category = '', page = 1, pageSize = 20) { return (await apiClient.get<PaginatedResponse<IPRiskEvent>>(base + '/events', { params: { ip, reason, category, page, page_size: pageSize } })).data },
   async bans() { return (await apiClient.get<{ items: IPBan[] }>(base + '/bans')).data.items },
+  async anonymousBans() { return (await apiClient.get<{ items: IPBan[] }>(base + '/anonymous-bans')).data.items },
+  async unbanAnonymous(network: string) { await apiClient.post(base + '/anonymous-unban', { network }) },
   async unban(network: string) { await apiClient.post(base + '/unban', { network }) },
   async clearEvents() { await apiClient.delete(base + '/events') },
   async check(ip: string, user_agent: string, auth: boolean) { return (await apiClient.post<IPRiskEvent>(base + '/check', { ip, user_agent, auth })).data }
