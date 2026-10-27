@@ -337,6 +337,7 @@ export default {
         platform: 'Platform',
         type: 'Type',
         capacity: 'Capacity',
+        iqStrip: 'IQ Test',
         notes: 'Notes',
         priority: 'Priority',
         billingRateMultiplier: 'Billing Rate',
@@ -354,6 +355,7 @@ export default {
         expiresAt: 'Expires At',
         actions: 'Actions'
       },
+      iqStrip: { noPlan: 'No candy test rule for this account', legend: 'Top {top} / Bottom {bottom}', ok: 'Correct', bad: 'Wrong', error: 'No answer (error)', none: 'No result', seconds: '{n}s' },
       schedulerScore: {
         baseShort: 'Base',
         stickyShort: 'Sticky',

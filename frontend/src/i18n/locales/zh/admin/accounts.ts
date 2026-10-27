@@ -180,6 +180,7 @@ export default {
         platform: '平台',
         type: '类型',
         capacity: '容量',
+        iqStrip: '智商测试',
         notes: '备注',
         priority: '优先级',
         billingRateMultiplier: '账号倍率',
@@ -197,6 +198,7 @@ export default {
         expiresAt: '过期时间',
         actions: '操作'
       },
+      iqStrip: { noPlan: '这个号没有糖果题测试规则', legend: '上 {top} / 下 {bottom}', ok: '答对', bad: '答错', error: '没有答案（报错）', none: '暂无结果', seconds: '{n} 秒' },
       schedulerScore: {
         baseShort: '普通',
         stickyShort: '粘性',

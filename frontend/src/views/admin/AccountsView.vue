@@ -290,6 +290,9 @@
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" :concurrency-upgrade-enabled="concurrencyUpgradeEnabled" />
           </template>
+          <template #cell-iq_strip="{ row }">
+            <AccountQualityStrip :strip="qualityStripByAccountId[String(row.id)]" />
+          </template>
           <template #cell-status="{ row }">
             <div class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" :global-bps-enabled="appStore.cachedPublicSettings?.excel_bps_enabled !== false" @show-temp-unsched="handleShowTempUnsched" />
@@ -507,6 +510,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import { listQualityPlans } from '@/api/admin/accountQuality'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
@@ -538,6 +542,7 @@ import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vu
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import SchedulableTimerControl from '@/components/account/SchedulableTimerControl.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import AccountQualityStrip from '@/components/account/AccountQualityStrip.vue'
 import ExcelBPS403Badge from '@/components/account/ExcelBPS403Badge.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import NewAPIUpstreamConfigDialog from '@/components/account/NewAPIUpstreamConfigDialog.vue'
@@ -548,6 +553,7 @@ import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRules
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { buildQualityStrip, pickQualityStripPlan, qualityStripResultLimit, type QualityStrip } from '@/utils/accountQualityStrip'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -771,6 +777,10 @@ const todayStatsLoading = ref(false)
 const todayStatsError = ref<string | null>(null)
 const todayStatsReqSeq = ref(0)
 const pendingTodayStatsRefresh = ref(false)
+const qualityStripByAccountId = ref<Record<string, QualityStrip | null>>({})
+const qualityStripFetchedAt = ref(0)
+const qualityStripReqSeq = ref(0)
+const QUALITY_STRIP_REFRESH_INTERVAL_MS = 60 * 1000
 const usageManualRefreshToken = ref(0)
 
 const desktopViewportQuery = '(min-width: 768px)'
@@ -975,6 +985,65 @@ const refreshTodayStatsBatch = async () => {
   }
 }
 
+const refreshQualityStrips = async (force = false) => {
+  if (hiddenColumns.has('iq_strip')) return
+  if (!force && Date.now() - qualityStripFetchedAt.value < QUALITY_STRIP_REFRESH_INTERVAL_MS) return
+
+  const accountIDs = accounts.value.map(account => account.id)
+  const reqSeq = ++qualityStripReqSeq.value
+  const next: Record<string, QualityStrip | null> = {}
+  for (const accountID of accountIDs) {
+    next[String(accountID)] = null
+  }
+  if (accountIDs.length === 0) {
+    qualityStripByAccountId.value = next
+    qualityStripFetchedAt.value = Date.now()
+    return
+  }
+
+  try {
+    const plans = await listQualityPlans()
+    if (reqSeq !== qualityStripReqSeq.value) return
+
+    const plansByAccountId = plans.reduce<Record<string, typeof plans>>((grouped, plan) => {
+      const key = String(plan.account_id)
+      const accountPlans = grouped[key] ?? []
+      accountPlans.push(plan)
+      grouped[key] = accountPlans
+      return grouped
+    }, {})
+
+    const entries = accountIDs.flatMap(accountID => {
+      const plan = pickQualityStripPlan(plansByAccountId[String(accountID)] ?? [])
+      return plan ? [{ accountID, plan }] : []
+    })
+
+    const settled = await Promise.allSettled(entries.map(async entry => ({
+      accountID: entry.accountID,
+      strip: buildQualityStrip(
+        entry.plan,
+        await adminAPI.scheduledTests.listResults(
+          entry.plan.id,
+          qualityStripResultLimit(entry.plan),
+          true
+        )
+      )
+    })))
+
+    if (reqSeq !== qualityStripReqSeq.value) return
+
+    settled.forEach((outcome, index) => {
+      const key = String(entries[index].accountID)
+      next[key] = outcome.status === 'fulfilled' ? outcome.value.strip : null
+    })
+
+    qualityStripByAccountId.value = next
+    qualityStripFetchedAt.value = Date.now()
+  } catch (error) {
+    console.error('Failed to load account quality strips:', error)
+  }
+}
+
 const autoRefreshIntervalLabel = (sec: number) => {
   if (sec === 5) return t('admin.accounts.refreshInterval5s')
   if (sec === 10) return t('admin.accounts.refreshInterval10s')
@@ -1117,6 +1186,11 @@ const toggleColumn = (key: string) => {
       console.error('Failed to load account today stats after showing column:', error)
     })
   }
+  if (key === 'iq_strip' && wasHidden) {
+    void refreshQualityStrips(true).catch((error) => {
+      console.error('Failed to load account quality strips after showing column:', error)
+    })
+  }
   if (key === 'scheduler_score') {
     // The server only returns scheduler scores when this column is visible, so reload the current page immediately.
     syncAccountListDerivedParams()
@@ -1230,6 +1304,9 @@ const load = async (options: AccountLoadOptions = {}) => {
   requestParams.lite = '1'
   await Promise.all([baseLoad(), loadConcurrencyUpgradeState()])
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
+  void refreshQualityStrips(true).catch((error) => {
+    console.error('Failed to load account quality strips:', error)
+  })
 }
 
 const reload = async () => {
@@ -1239,6 +1316,9 @@ const reload = async () => {
   pendingTodayStatsRefresh.value = false
   await Promise.all([baseReload(), loadConcurrencyUpgradeState()])
   await refreshTodayStatsBatch()
+  void refreshQualityStrips(true).catch((error) => {
+    console.error('Failed to load account quality strips:', error)
+  })
 }
 
 const buildUpstreamBillingRateFilters = () => {
@@ -1568,6 +1648,8 @@ const refreshAccountsIncrementally = async () => {
     upstreamBillingNow.value = Date.now()
 
     await refreshTodayStatsBatch()
+    // 不阻塞自动刷新；函数内部已吞掉错误，且 60 秒内只拉一次。
+    void refreshQualityStrips()
   } catch (error) {
     console.error('Auto refresh failed:', error)
   } finally {
@@ -1885,6 +1967,7 @@ const allColumns = computed(() => {
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+    { key: 'iq_strip', label: t('admin.accounts.columns.iqStrip'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
