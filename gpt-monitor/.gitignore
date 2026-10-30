@@ -1,0 +1,17 @@
+.env
+frontend/node_modules/
+frontend/dist/
+internal/webui/dist/*
+!internal/webui/dist/index.html
+gpt-pro-monitor
+*.log
+.DS_Store
+coverage/
+.env.local
+.local-tunnel.pid
+data/
+
+# 本地快照/备份文件（2026-10-30 上传前加）
+*.bak
+*.bak-*
+.env.bak*

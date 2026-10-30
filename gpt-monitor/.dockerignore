@@ -1,0 +1,8 @@
+.git
+.env
+frontend/node_modules
+internal/webui/dist
+*.log
+.DS_Store
+deploy
+data

@@ -1,0 +1,37 @@
+services:
+  gpt-pro-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gpt-pro-monitor:latest
+    container_name: gpt-pro-monitor
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8095:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # 只读根文件系统下唯一可写的地方：智商检测的 SQLite。宿主机目录属主要是 65532（distroless nonroot）。
+    volumes:
+      - ./data:/data
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "/app/gpt-pro-monitor", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - sub2api
+
+networks:
+  sub2api:
+    external: true
+    name: sub2api-iq_sub2api-network
