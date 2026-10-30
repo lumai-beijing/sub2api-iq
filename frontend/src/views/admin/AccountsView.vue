@@ -780,6 +780,8 @@ const pendingTodayStatsRefresh = ref(false)
 const qualityStripByAccountId = ref<Record<string, QualityStrip | null>>({})
 const qualityStripFetchedAt = ref(0)
 const qualityStripReqSeq = ref(0)
+// 筛选、翻页会换一批账号：表格加载完后补拉这批账号的智商条，否则新出现的账号没有数据。
+const pendingQualityStripRefresh = ref(false)
 const QUALITY_STRIP_REFRESH_INTERVAL_MS = 60 * 1000
 const usageManualRefreshToken = ref(0)
 
@@ -1464,6 +1466,7 @@ const debouncedReload = () => {
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
+  pendingQualityStripRefresh.value = true
   baseDebouncedReload()
 }
 
@@ -1472,6 +1475,7 @@ const handlePageChange = (page: number) => {
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
+  pendingQualityStripRefresh.value = true
   baseHandlePageChange(page)
 }
 
@@ -1480,6 +1484,7 @@ const handlePageSizeChange = (size: number) => {
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
+  pendingQualityStripRefresh.value = true
   baseHandlePageSizeChange(size)
 }
 
@@ -1506,6 +1511,10 @@ watch(loading, (isLoading, wasLoading) => {
     refreshTodayStatsBatch().catch((error) => {
       console.error('Failed to refresh account today stats after table load:', error)
     })
+  }
+  if (wasLoading && !isLoading && pendingQualityStripRefresh.value) {
+    pendingQualityStripRefresh.value = false
+    void refreshQualityStrips(true)
   }
 })
 
