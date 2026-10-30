@@ -1,0 +1,28 @@
+services:
+  gpt-pro-monitor-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gpt-pro-monitor:local
+    container_name: gpt-pro-monitor-local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env.local
+    ports:
+      - "127.0.0.1:18095:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/app/gpt-pro-monitor", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
