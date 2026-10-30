@@ -167,7 +167,7 @@ export default {
   "cron": "检测周期（五段 Cron，服务端时区）",
   "randomSchedule": "每 {min}–{max} 分钟随机一次",
   "fixedIntervalSchedule": "每轮结束后 {minutes} 分钟",
-  "randomScheduleHint": "也可以写 @random 10-15：每轮跑完后在 10–15 分钟之间随机等一段时间再测，各个号不会同时跑。",
+  "randomScheduleHint": "也可以写 {'@'}random 10-15：每轮跑完后在 10–15 分钟之间随机等一段时间再测，各个号不会同时跑。",
   "scheduleRandomButton": "每 10–15 分钟随机",
   "schedule30Button": "每 30 分钟",
   "effort": "推理强度",

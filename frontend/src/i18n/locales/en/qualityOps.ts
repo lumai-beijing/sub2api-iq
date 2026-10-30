@@ -167,7 +167,7 @@ export default {
   "cron": "Schedule (five-field Cron, server timezone)",
   "randomSchedule": "Randomly every {min}–{max} min",
   "fixedIntervalSchedule": "{minutes} min after each run",
-  "randomScheduleHint": "You can also write @random 10-15: after each run, wait a random 10–15 minutes before the next one, so accounts don't all run at once.",
+  "randomScheduleHint": "You can also write {'@'}random 10-15: after each run, wait a random 10–15 minutes before the next one, so accounts don't all run at once.",
   "scheduleRandomButton": "Random 10–15 min",
   "schedule30Button": "Every 30 min",
   "effort": "Reasoning effort",
